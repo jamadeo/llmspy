@@ -50,31 +50,16 @@
             font-size: 13px;
             min-width: 500px;
             font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            cursor: pointer;
+        }
+
+        select:hover {
+            border-color: #0066cc;
         }
 
         .file-size {
             color: #999;
             font-size: 11px;
-        }
-
-        button {
-            padding: 8px 16px;
-            background: #0066cc;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            font-size: 14px;
-            cursor: pointer;
-            font-weight: 600;
-        }
-
-        button:hover {
-            background: #0052a3;
-        }
-
-        button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
         }
 
         .content {
@@ -186,50 +171,16 @@
             word-break: break-word;
         }
 
-        .event-text {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            font-size: 14px;
-            color: #333;
-            background: #f5f5f5;
-            padding: 8px;
-            border-radius: 3px;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
-
-        .events-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-
-        .toggle-view-btn {
-            padding: 6px 12px;
-            background: #f0f0f0;
-            color: #333;
-            border: 1px solid #d0d0d0;
-            border-radius: 4px;
-            font-size: 13px;
-            cursor: pointer;
-            font-weight: normal;
-        }
-
-        .toggle-view-btn:hover {
-            background: #e0e0e0;
-        }
-
         .accumulated-text {
             background: #fff;
             padding: 15px;
             border-radius: 4px;
             border: 1px solid #e0e0e0;
-            margin-top: 15px;
             font-size: 14px;
             line-height: 1.6;
             white-space: pre-wrap;
             word-break: break-word;
-            max-height: 400px;
+            max-height: 800px;
             overflow-y: auto;
         }
 
@@ -246,12 +197,121 @@
             font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
             font-size: 12px;
             overflow-x: auto;
-            max-height: 300px;
+            max-height: 600px;
             overflow-y: auto;
+            max-width: 100%;
         }
 
         .json-body pre {
             margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .messages-container {
+            max-height: 800px;
+            overflow-y: auto;
+        }
+
+        .message-group {
+            margin-bottom: 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .message-header {
+            background: #f5f5f5;
+            padding: 8px 12px;
+            font-weight: bold;
+            font-size: 13px;
+            color: #666;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .message-header.system {
+            background: #e3f2fd;
+            color: #1565c0;
+        }
+
+        .message-header.user {
+            background: #f3e5f5;
+            color: #6a1b9a;
+        }
+
+        .message-header.assistant {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .content-block {
+            padding: 12px;
+            background: white;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .content-block:last-child {
+            border-bottom: none;
+        }
+
+        .content-block-text {
+            font-size: 14px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: #333;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .toggle-json-btn {
+            padding: 6px 12px;
+            background: #f0f0f0;
+            color: #333;
+            border: 1px solid #d0d0d0;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            font-weight: normal;
+        }
+
+        .toggle-json-btn:hover {
+            background: #e0e0e0;
+        }
+
+        .collapsible-section {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .collapsible-section h2 {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .collapse-icon {
+            font-size: 14px;
+            transition: transform 0.2s;
+        }
+
+        .collapse-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .collapsible-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+
+        .collapsible-content.expanded {
+            max-height: 600px;
         }
 
         .status-badge {
@@ -292,7 +352,6 @@
                 <select id="fileSelect">
                     <option value="">Loading files...</option>
                 </select>
-                <button id="loadButton" disabled>Load</button>
             </div>
         </header>
 
@@ -306,16 +365,13 @@
 
     <script>
         const fileSelect = document.getElementById('fileSelect');
-        const loadButton = document.getElementById('loadButton');
         const content = document.getElementById('content');
 
         // Load available files on page load
         loadFileList();
 
-        loadButton.addEventListener('click', handleLoadFile);
-        fileSelect.addEventListener('change', () => {
-            loadButton.disabled = !fileSelect.value;
-        });
+        // Auto-load file when selection changes
+        fileSelect.addEventListener('change', handleLoadFile);
 
         function formatFileSize(bytes) {
             if (bytes < 1024) return bytes + ' B';
@@ -340,8 +396,6 @@
                     option.textContent = `${file.name} (${formatFileSize(file.size)})`;
                     fileSelect.appendChild(option);
                 });
-
-                loadButton.disabled = true;
             } catch (error) {
                 console.error('Error loading files:', error);
                 fileSelect.innerHTML = '<option value="">Error loading files</option>';
@@ -350,7 +404,7 @@
 
         async function handleLoadFile() {
             const filename = fileSelect.value;
-            if (!filename) return;
+            if (!filename || filename === 'Select a file...') return;
 
             try {
                 const response = await fetch(`/api/file/${encodeURIComponent(filename)}`);
@@ -373,52 +427,137 @@
             }
         }
 
-        let showRawJSON = false;
+        let showRequestJSON = false;
 
-        function toggleEventView() {
-            showRawJSON = !showRawJSON;
-            const btn = document.getElementById('toggleViewBtn');
-            btn.textContent = showRawJSON ? 'Show Text View' : 'Show Raw JSON';
+        function toggleRequestView() {
+            showRequestJSON = !showRequestJSON;
+            const prettyContainer = document.getElementById('prettyRequest');
+            const rawContainer = document.getElementById('rawRequest');
+            const btn = document.getElementById('toggleRequestBtn');
 
-            // Re-render events
-            const eventsContainer = document.querySelector('.events-container');
-            const currentEvents = window.currentEvents || [];
-            eventsContainer.innerHTML = renderEvents(currentEvents);
+            if (showRequestJSON) {
+                prettyContainer.style.display = 'none';
+                rawContainer.style.display = 'block';
+                btn.textContent = 'Show Pretty View';
+            } else {
+                prettyContainer.style.display = 'block';
+                rawContainer.style.display = 'none';
+                btn.textContent = 'Show Raw JSON';
+            }
         }
 
-        function renderEvents(events) {
-            return events.map((event, index) => {
-                const hasDeltaText = event.data?.delta?.text;
+        function toggleOtherEvents() {
+            const content = document.getElementById('otherEventsContent');
+            const icon = document.getElementById('otherEventsIcon');
 
-                let content;
-                if (!showRawJSON && hasDeltaText) {
-                    content = `<div class="event-text">${escapeHtml(event.data.delta.text)}</div>`;
-                } else {
-                    content = `<div class="event-data"><pre>${JSON.stringify(event.data, null, 2)}</pre></div>`;
-                }
+            if (content.classList.contains('expanded')) {
+                content.classList.remove('expanded');
+                icon.classList.add('collapsed');
+            } else {
+                content.classList.add('expanded');
+                icon.classList.remove('collapsed');
+            }
+        }
+
+        function renderMessages(messages, role = null) {
+            if (!messages || messages.length === 0) return '';
+
+            return messages.map(msg => {
+                const messageRole = role || msg.role || 'unknown';
+                const contentBlocks = msg.content || [];
 
                 return `
-                    <div class="event">
-                        <div class="event-header">
-                            <span class="event-type">${escapeHtml(event.event || 'unknown')}</span>
-                            <span class="event-index">#${index + 1}</span>
-                        </div>
-                        ${content}
+                    <div class="message-group">
+                        <div class="message-header ${messageRole}">${messageRole.toUpperCase()}</div>
+                        ${contentBlocks.map(block => {
+                            if (block.type === 'text' && block.text) {
+                                return `
+                                    <div class="content-block">
+                                        <div class="content-block-text">${escapeHtml(block.text)}</div>
+                                    </div>
+                                `;
+                            } else {
+                                // For non-text blocks, show the JSON
+                                return `
+                                    <div class="content-block">
+                                        <div style="font-size: 12px; color: #999; margin-bottom: 4px;">
+                                            ${block.type || 'unknown type'}
+                                        </div>
+                                        <div class="json-body" style="margin: 0;">
+                                            <pre>${JSON.stringify(block, null, 2)}</pre>
+                                        </div>
+                                    </div>
+                                `;
+                            }
+                        }).join('')}
                     </div>
                 `;
             }).join('');
         }
 
-        function renderContent(request, response, events) {
-            // Store events globally for toggle
-            window.currentEvents = events;
-            showRawJSON = false;
+        function renderPrettyRequest(requestBody) {
+            if (!requestBody) {
+                return '<p style="color: #999;">No request body</p>';
+            }
 
-            // Accumulate text from streaming events
+            let html = '';
+
+            // Render system messages first (they are content blocks, not message objects)
+            if (requestBody.system && requestBody.system.length > 0) {
+                html += '<div style="margin-bottom: 20px;">';
+                html += '<div style="font-weight: bold; color: #1565c0; margin-bottom: 10px; font-size: 14px;">SYSTEM MESSAGES</div>';
+                html += '<div class="message-group">';
+                html += '<div class="message-header system">SYSTEM</div>';
+                html += requestBody.system.map(block => {
+                    if (block.type === 'text' && block.text) {
+                        return `
+                            <div class="content-block">
+                                <div class="content-block-text">${escapeHtml(block.text)}</div>
+                            </div>
+                        `;
+                    } else {
+                        return `
+                            <div class="content-block">
+                                <div style="font-size: 12px; color: #999; margin-bottom: 4px;">
+                                    ${block.type || 'unknown type'}
+                                </div>
+                                <div class="json-body" style="margin: 0;">
+                                    <pre>${JSON.stringify(block, null, 2)}</pre>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }).join('');
+                html += '</div>';
+                html += '</div>';
+            }
+
+            // Render regular messages
+            if (requestBody.messages && requestBody.messages.length > 0) {
+                if (html) {
+                    html += '<div style="margin-bottom: 20px;">';
+                    html += '<div style="font-weight: bold; color: #666; margin-bottom: 10px; font-size: 14px;">MESSAGES</div>';
+                }
+                html += renderMessages(requestBody.messages);
+                if (html && requestBody.system) html += '</div>';
+            }
+
+            return html || '<p style="color: #999;">No messages found</p>';
+        }
+
+        function renderContent(request, response, events) {
+            // Reset request view toggle
+            showRequestJSON = false;
+
+            // Separate events into text deltas and other events
             let accumulatedText = '';
+            const otherEvents = [];
+
             events.forEach(event => {
-                if (event.event === 'content_block_delta' && event.data?.delta?.text) {
+                if (event.data?.delta?.text) {
                     accumulatedText += event.data.delta.text;
+                } else {
+                    otherEvents.push(event);
                 }
             });
 
@@ -427,64 +566,124 @@
                 : 'status-error';
 
             content.innerHTML = `
-                <!-- Request Section -->
-                <div class="section">
-                    <h2>📤 Request</h2>
-                    <div class="metadata">
-                        <div class="metadata-row">
-                            <span class="metadata-label">Method:</span>
-                            <span class="metadata-value">${escapeHtml(request.method)}</span>
+                ${accumulatedText ? `
+                    <!-- Request Body Section -->
+                    <div class="section">
+                        <div class="section-header">
+                            <h2 style="margin: 0;">📤 Request</h2>
+                            <button id="toggleRequestBtn" class="toggle-json-btn" onclick="toggleRequestView()">Show Raw JSON</button>
                         </div>
-                        <div class="metadata-row">
-                            <span class="metadata-label">URL:</span>
-                            <span class="metadata-value">${escapeHtml(request.url)}</span>
-                        </div>
-                        <div class="metadata-row">
-                            <span class="metadata-label">Host:</span>
-                            <span class="metadata-value">${escapeHtml(request.host)}:${request.port}</span>
-                        </div>
+                        ${request.body ? `
+                            <div id="prettyRequest" class="messages-container">
+                                ${renderPrettyRequest(request.body)}
+                            </div>
+                            <div id="rawRequest" class="json-body" style="display: none;">
+                                <pre>${JSON.stringify(request.body, null, 2)}</pre>
+                            </div>
+                        ` : '<p style="color: #999;">No request body</p>'}
                     </div>
 
-                    ${request.body ? `
-                        <div class="headers-title">Request Body:</div>
-                        <div class="json-body">
-                            <pre>${JSON.stringify(request.body, null, 2)}</pre>
-                        </div>
-                    ` : '<p style="color: #999; margin-top: 15px;">No request body</p>'}
-                </div>
-
-                <!-- Response Section -->
-                <div class="section">
-                    <h2>📥 Response</h2>
-                    <div class="metadata">
-                        <div class="metadata-row">
-                            <span class="metadata-label">Status:</span>
-                            <span class="metadata-value">
-                                <span class="status-badge ${statusClass}">
-                                    ${response.status_code} ${escapeHtml(response.reason)}
-                                </span>
-                            </span>
-                        </div>
-                    </div>
-
-                    ${accumulatedText ? `
-                        <div class="accumulated-text-title">Accumulated Response Text:</div>
+                    <!-- Response Text Section -->
+                    <div class="section">
+                        <h2>📝 Response Text</h2>
                         <div class="accumulated-text">${escapeHtml(accumulatedText)}</div>
-                    ` : ''}
-                </div>
+                    </div>
 
-                <!-- Events Section -->
-                ${events.length > 0 ? `
-                    <div class="section" style="grid-column: 1 / -1;">
-                        <div class="events-header">
-                            <h2 style="margin: 0;">📡 Streaming Events (${events.length})</h2>
-                            <button id="toggleViewBtn" class="toggle-view-btn" onclick="toggleEventView()">Show Raw JSON</button>
+                    <!-- Other Events Section -->
+                    ${otherEvents.length > 0 ? `
+                        <div class="section" style="grid-column: 1 / -1;">
+                            <div class="collapsible-section" onclick="toggleOtherEvents()">
+                                <h2>
+                                    <span class="collapse-icon collapsed" id="otherEventsIcon">▼</span>
+                                    📡 Other Events (${otherEvents.length})
+                                </h2>
+                            </div>
+                            <div class="collapsible-content" id="otherEventsContent">
+                                <div class="events-container">
+                                    ${otherEvents.map((event, index) => `
+                                        <div class="event">
+                                            <div class="event-header">
+                                                <span class="event-type">${escapeHtml(event.event || 'unknown')}</span>
+                                                <span class="event-index">#${index + 1}</span>
+                                            </div>
+                                            <div class="event-data">
+                                                <pre>${JSON.stringify(event.data, null, 2)}</pre>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
                         </div>
-                        <div class="events-container">
-                            ${renderEvents(events)}
+                    ` : ''}
+                ` : `
+                    <!-- No response text - show full request and response info -->
+                    <div class="section">
+                        <h2>📤 Request</h2>
+                        <div class="metadata">
+                            <div class="metadata-row">
+                                <span class="metadata-label">Method:</span>
+                                <span class="metadata-value">${escapeHtml(request.method)}</span>
+                            </div>
+                            <div class="metadata-row">
+                                <span class="metadata-label">URL:</span>
+                                <span class="metadata-value">${escapeHtml(request.url)}</span>
+                            </div>
+                            <div class="metadata-row">
+                                <span class="metadata-label">Host:</span>
+                                <span class="metadata-value">${escapeHtml(request.host)}:${request.port}</span>
+                            </div>
+                        </div>
+
+                        ${request.body ? `
+                            <div class="headers-title">Request Body:</div>
+                            <div class="json-body">
+                                <pre>${JSON.stringify(request.body, null, 2)}</pre>
+                            </div>
+                        ` : '<p style="color: #999; margin-top: 15px;">No request body</p>'}
+                    </div>
+
+                    <!-- Response Section -->
+                    <div class="section">
+                        <h2>📥 Response</h2>
+                        <div class="metadata">
+                            <div class="metadata-row">
+                                <span class="metadata-label">Status:</span>
+                                <span class="metadata-value">
+                                    <span class="status-badge ${statusClass}">
+                                        ${response.status_code} ${escapeHtml(response.reason)}
+                                    </span>
+                                </span>
+                            </div>
                         </div>
                     </div>
-                ` : ''}
+
+                    <!-- Other Events Section -->
+                    ${otherEvents.length > 0 ? `
+                        <div class="section" style="grid-column: 1 / -1;">
+                            <div class="collapsible-section" onclick="toggleOtherEvents()">
+                                <h2>
+                                    <span class="collapse-icon collapsed" id="otherEventsIcon">▼</span>
+                                    📡 Events (${otherEvents.length})
+                                </h2>
+                            </div>
+                            <div class="collapsible-content" id="otherEventsContent">
+                                <div class="events-container">
+                                    ${otherEvents.map((event, index) => `
+                                        <div class="event">
+                                            <div class="event-header">
+                                                <span class="event-type">${escapeHtml(event.event || 'unknown')}</span>
+                                                <span class="event-index">#${index + 1}</span>
+                                            </div>
+                                            <div class="event-data">
+                                                <pre>${JSON.stringify(event.data, null, 2)}</pre>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        </div>
+                    ` : ''}
+                `}
             `;
         }
 
