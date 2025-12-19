@@ -115,9 +115,6 @@ class RequestLogger:
             # Write response line
             f.write(json.dumps(response_obj) + "\n")
 
-        # Print to stderr so user knows where the log was saved
-        print(f"Logged: {file_path}", file=sys.stderr)
-
 
 async def run_proxy(port: int, log_dir: str, upstream: str):
     """Run the mitmproxy server in reverse proxy mode."""
