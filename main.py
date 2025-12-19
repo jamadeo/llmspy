@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import subprocess
 import sys
@@ -24,9 +25,30 @@ class RequestLogger:
         """Log complete HTTP request/response pair to individual file."""
         self.request_counter += 1
 
+        # Extract and sanitize URL path
+        from urllib.parse import urlparse
+
+        parsed_url = urlparse(flow.request.url)
+        url_path = parsed_url.path.strip("/")  # Remove leading/trailing slashes
+
+        # Replace slashes with underscores and sanitize
+        url_path = url_path.replace("/", "_")
+        # Remove any other problematic characters
+        url_path = "".join(
+            c if c.isalnum() or c in ("_", "-") else "_" for c in url_path
+        )
+
+        # Limit to 50 characters
+        if len(url_path) > 50:
+            url_path = url_path[:50]
+
+        # Use a default if path is empty
+        if not url_path:
+            url_path = "root"
+
         # Create unique filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        filename = f"{timestamp}_{self.request_counter:03d}_{flow.request.method}.log"
+        filename = f"{timestamp}_{self.request_counter:03d}_{url_path}_{flow.request.method}.log"
         file_path = self.log_dir / filename
 
         # Write request and response to file
@@ -36,12 +58,12 @@ class RequestLogger:
 
             # Log request
             print(f"{'=' * 80}", file=f)
-            print(f"REQUEST", file=f)
+            print("REQUEST", file=f)
             print(f"{'=' * 80}", file=f)
             print(f"Method: {req.method}", file=f)
             print(f"URL: {req.url}", file=f)
             print(f"Host: {req.host}:{req.port}", file=f)
-            print(f"\nRequest Headers:", file=f)
+            print("\nRequest Headers:", file=f)
             for name, value in req.headers.items():
                 print(f"  {name}: {value}", file=f)
 
@@ -58,10 +80,10 @@ class RequestLogger:
             # Log response
             if resp:
                 print(f"\n{'=' * 80}", file=f)
-                print(f"RESPONSE", file=f)
+                print("RESPONSE", file=f)
                 print(f"{'=' * 80}", file=f)
                 print(f"Status: {resp.status_code} {resp.reason}", file=f)
-                print(f"\nResponse Headers:", file=f)
+                print("\nResponse Headers:", file=f)
                 for name, value in resp.headers.items():
                     print(f"  {name}: {value}", file=f)
 
@@ -76,7 +98,7 @@ class RequestLogger:
                         print(f"Body (first 200 bytes): {resp.content[:200]!r}", file=f)
             else:
                 print(f"\n{'=' * 80}", file=f)
-                print(f"WARNING: No response received", file=f)
+                print("WARNING: No response received", file=f)
 
             print(f"\n{'=' * 80}", file=f)
 
@@ -161,7 +183,7 @@ def main():
     )
 
     # Start the proxy server
-    proxy_thread = start_proxy_thread(proxy_port, log_dir, upstream)
+    _proxy_thread = start_proxy_thread(proxy_port, log_dir, upstream)
 
     # Give the proxy a moment to start
     time.sleep(2)
