@@ -9,4 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
-llmspy = "main:main"
+llmspy = "llmspy.main:main"
+
+[tool.setuptools.package-data]
+llmspy = ["viewer.html"]
