@@ -21,19 +21,15 @@ class RequestLogger:
         self.log_dir = Path(log_dir)
         self.request_counter = 0
 
-    def response(self, flow: http.HTTPFlow) -> None:
-        """Log complete HTTP request/response pair to individual file."""
-        self.request_counter += 1
-
-        # Extract and sanitize URL path
+    def _get_sanitized_path(self, url):
+        """Extract and sanitize URL path for filename."""
         from urllib.parse import urlparse
 
-        parsed_url = urlparse(flow.request.url)
-        url_path = parsed_url.path.strip("/")  # Remove leading/trailing slashes
+        parsed_url = urlparse(url)
+        url_path = parsed_url.path.strip("/")
 
         # Replace slashes with underscores and sanitize
         url_path = url_path.replace("/", "_")
-        # Remove any other problematic characters
         url_path = "".join(
             c if c.isalnum() or c in ("_", "-") else "_" for c in url_path
         )
@@ -46,7 +42,14 @@ class RequestLogger:
         if not url_path:
             url_path = "root"
 
+        return url_path
+
+    def response(self, flow: http.HTTPFlow) -> None:
+        """Log complete HTTP request/response pair to individual file in JSONL format."""
+        self.request_counter += 1
+
         # Create unique filename
+        url_path = self._get_sanitized_path(flow.request.url)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"{timestamp}_{self.request_counter:03d}_{url_path}_{flow.request.method}.jsonl"
         file_path = self.log_dir / filename
@@ -68,14 +71,11 @@ class RequestLogger:
             # Handle request body
             if req.content:
                 try:
-                    # Try to parse as JSON
                     request_obj["body"] = json.loads(req.content.decode("utf-8"))
                 except (json.JSONDecodeError, UnicodeDecodeError):
-                    # If not JSON, try to decode as string
                     try:
                         request_obj["body"] = req.content.decode("utf-8", errors="replace")
                     except Exception:
-                        # If all else fails, include as base64
                         import base64
                         request_obj["body"] = base64.b64encode(req.content).decode("ascii")
                         request_obj["body_encoding"] = "base64"
@@ -96,14 +96,11 @@ class RequestLogger:
                 # Handle response body
                 if resp.content:
                     try:
-                        # Try to parse as JSON
                         response_obj["body"] = json.loads(resp.content.decode("utf-8"))
                     except (json.JSONDecodeError, UnicodeDecodeError):
-                        # If not JSON, try to decode as string
                         try:
                             response_obj["body"] = resp.content.decode("utf-8", errors="replace")
                         except Exception:
-                            # If all else fails, include as base64
                             import base64
                             response_obj["body"] = base64.b64encode(resp.content).decode("ascii")
                             response_obj["body_encoding"] = "base64"
