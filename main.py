@@ -3,6 +3,9 @@ import os
 import subprocess
 import sys
 import threading
+import time
+from datetime import datetime
+from pathlib import Path
 
 from mitmproxy import http
 from mitmproxy.options import Options
@@ -10,99 +13,75 @@ from mitmproxy.tools.dump import DumpMaster
 
 
 class RequestLogger:
-    """Mitmproxy addon that logs HTTP requests and responses."""
+    """Mitmproxy addon that logs HTTP requests and responses to individual files."""
 
-    def __init__(self, log_file):
-        """Initialize with a log file."""
-        self.log_file = log_file
-
-    def requestheaders(self, flow: http.HTTPFlow) -> None:
-        """Enable streaming for all flows."""
-        flow.request.stream = True
-
-    def responseheaders(self, flow: http.HTTPFlow) -> None:
-        """Enable streaming for responses and log headers early."""
-        flow.response.stream = True
-
-        import time
-
-        timestamp = time.strftime("%H:%M:%S")
-
-        # Log request when we see response headers (request body may have been streamed)
-        req = flow.request
-        print(f"\n{'=' * 80}", file=self.log_file)
-        print(f"[{timestamp}] REQUEST: {req.method} {req.url}", file=self.log_file)
-        print(f"Host: {req.host}:{req.port}", file=self.log_file)
-        print(f"Headers:", file=self.log_file)
-        for name, value in req.headers.items():
-            print(f"  {name}: {value}", file=self.log_file)
-        print("Body: <streamed>", file=self.log_file)
-        print(f"{'=' * 80}\n", file=self.log_file)
-
-        # Log response headers
-        resp = flow.response
-        print(f"\n{'=' * 80}", file=self.log_file)
-        print(
-            f"[{timestamp}] RESPONSE: {flow.request.method} {flow.request.url}",
-            file=self.log_file,
-        )
-        print(f"Status: {resp.status_code} {resp.reason}", file=self.log_file)
-        print(f"Headers:", file=self.log_file)
-        for name, value in resp.headers.items():
-            print(f"  {name}: {value}", file=self.log_file)
-        print("Body: <streamed> - forwarding to client...", file=self.log_file)
-        print(f"{'=' * 80}\n", file=self.log_file)
-        self.log_file.flush()
-
-    def request(self, flow: http.HTTPFlow) -> None:
-        """Log HTTP request details (only called for non-streamed requests)."""
-        req = flow.request
-        print(f"\n{'=' * 80}", file=self.log_file)
-        print(f"REQUEST: {req.method} {req.url}", file=self.log_file)
-        print(f"Host: {req.host}:{req.port}", file=self.log_file)
-        print(f"Headers:", file=self.log_file)
-        for name, value in req.headers.items():
-            print(f"  {name}: {value}", file=self.log_file)
-        if req.content:
-            print(f"Body length: {len(req.content)} bytes", file=self.log_file)
-            body_preview = req.content[:100]
-            print(
-                f"Body preview (first 100 bytes): {body_preview!r}", file=self.log_file
-            )
-        print(f"{'=' * 80}\n", file=self.log_file)
-        self.log_file.flush()
+    def __init__(self, log_dir):
+        """Initialize with a log directory."""
+        self.log_dir = Path(log_dir)
+        self.request_counter = 0
 
     def response(self, flow: http.HTTPFlow) -> None:
-        """Log HTTP response details."""
-        resp = flow.response
-        if resp:
-            print(f"\n{'=' * 80}", file=self.log_file)
-            print(
-                f"RESPONSE: {flow.request.method} {flow.request.url}",
-                file=self.log_file,
-            )
-            print(f"Status: {resp.status_code} {resp.reason}", file=self.log_file)
-            print(f"Headers:", file=self.log_file)
-            for name, value in resp.headers.items():
-                print(f"  {name}: {value}", file=self.log_file)
-            if resp.content:
-                print(f"Body length: {len(resp.content)} bytes", file=self.log_file)
-                body_preview = resp.content[:100]
-                print(
-                    f"Body preview (first 100 bytes): {body_preview!r}",
-                    file=self.log_file,
-                )
-            print(f"{'=' * 80}\n", file=self.log_file)
-            self.log_file.flush()
-        else:
-            print(
-                f"\nWARNING: No response for {flow.request.method} {flow.request.url}",
-                file=self.log_file,
-            )
-            self.log_file.flush()
+        """Log complete HTTP request/response pair to individual file."""
+        self.request_counter += 1
+
+        # Create unique filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        filename = f"{timestamp}_{self.request_counter:03d}_{flow.request.method}.log"
+        file_path = self.log_dir / filename
+
+        # Write request and response to file
+        with open(file_path, "w") as f:
+            req = flow.request
+            resp = flow.response
+
+            # Log request
+            print(f"{'=' * 80}", file=f)
+            print(f"REQUEST", file=f)
+            print(f"{'=' * 80}", file=f)
+            print(f"Method: {req.method}", file=f)
+            print(f"URL: {req.url}", file=f)
+            print(f"Host: {req.host}:{req.port}", file=f)
+            print(f"\nRequest Headers:", file=f)
+            for name, value in req.headers.items():
+                print(f"  {name}: {value}", file=f)
+
+            if req.content:
+                print(f"\nRequest Body ({len(req.content)} bytes):", file=f)
+                print("-" * 80, file=f)
+                try:
+                    body_text = req.content.decode("utf-8", errors="replace")
+                    print(body_text, file=f)
+                except Exception as e:
+                    print(f"[Error decoding body: {e}]", file=f)
+                    print(f"Body (first 200 bytes): {req.content[:200]!r}", file=f)
+
+            # Log response
+            if resp:
+                print(f"\n{'=' * 80}", file=f)
+                print(f"RESPONSE", file=f)
+                print(f"{'=' * 80}", file=f)
+                print(f"Status: {resp.status_code} {resp.reason}", file=f)
+                print(f"\nResponse Headers:", file=f)
+                for name, value in resp.headers.items():
+                    print(f"  {name}: {value}", file=f)
+
+                if resp.content:
+                    print(f"\nResponse Body ({len(resp.content)} bytes):", file=f)
+                    print("-" * 80, file=f)
+                    try:
+                        body_text = resp.content.decode("utf-8", errors="replace")
+                        print(body_text, file=f)
+                    except Exception as e:
+                        print(f"[Error decoding body: {e}]", file=f)
+                        print(f"Body (first 200 bytes): {resp.content[:200]!r}", file=f)
+            else:
+                print(f"\n{'=' * 80}", file=f)
+                print(f"WARNING: No response received", file=f)
+
+            print(f"\n{'=' * 80}", file=f)
 
 
-async def run_proxy(port: int, log_file, upstream: str):
+async def run_proxy(port: int, log_dir: str, upstream: str):
     """Run the mitmproxy server in reverse proxy mode."""
     opts = Options(
         listen_host="0.0.0.0",
@@ -114,7 +93,7 @@ async def run_proxy(port: int, log_file, upstream: str):
         with_termlog=False,
         with_dumper=False,
     )
-    master.addons.add(RequestLogger(log_file))
+    master.addons.add(RequestLogger(log_dir))
 
     try:
         await master.run()
@@ -123,11 +102,11 @@ async def run_proxy(port: int, log_file, upstream: str):
         master.shutdown()
 
 
-def start_proxy_thread(port: int, log_file, upstream: str):
+def start_proxy_thread(port: int, log_dir: str, upstream: str):
     """Start the proxy in a separate thread."""
 
     def run_async_proxy():
-        asyncio.run(run_proxy(port, log_file, upstream))
+        asyncio.run(run_proxy(port, log_dir, upstream))
 
     proxy_thread = threading.Thread(target=run_async_proxy, daemon=True)
     proxy_thread.start()
@@ -165,7 +144,11 @@ def main():
     # Extract command and arguments
     command = sys.argv[1:]
     proxy_port = 8080
-    log_filename = "http_requests.log"
+
+    # Create timestamped log directory
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_dir = f"llm-requests-{timestamp}"
+    Path(log_dir).mkdir(parents=True, exist_ok=True)
 
     # Check for reverse proxy mode
     upstream = os.environ.get("LLMSPY_UPSTREAM")
@@ -177,32 +160,24 @@ def main():
         file=sys.stderr,
     )
 
-    # Open log file
-    log_file = open(log_filename, "w", buffering=1)
-
     # Start the proxy server
-    proxy_thread = start_proxy_thread(proxy_port, log_file, upstream)
+    proxy_thread = start_proxy_thread(proxy_port, log_dir, upstream)
 
     # Give the proxy a moment to start
-    import time
-
     time.sleep(2)
 
     print(f"Running command: {' '.join(command)}", file=sys.stderr)
-    print(f"HTTP requests will be logged to: {log_filename}\n", file=sys.stderr)
+    print(f"HTTP requests will be logged to: {log_dir}/\n", file=sys.stderr)
 
     # Run the command with proxy configured
     try:
         exit_code = run_command_with_proxy(command, proxy_port)
-        log_file.close()
         sys.exit(exit_code)
     except KeyboardInterrupt:
         print("\nInterrupted by user", file=sys.stderr)
-        log_file.close()
         sys.exit(130)
     except FileNotFoundError:
         print(f"Error: Command '{command[0]}' not found", file=sys.stderr)
-        log_file.close()
         sys.exit(127)
 
 
