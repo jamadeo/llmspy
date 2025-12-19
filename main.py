@@ -4,7 +4,6 @@ import os
 import subprocess
 import sys
 import threading
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -48,7 +47,7 @@ class RequestLogger:
         return url_path
 
     def requestheaders(self, flow: http.HTTPFlow) -> None:
-        """Create log file and write request metadata."""
+        """Create log file for this request."""
         self.request_counter += 1
         self.flow_counter[flow.id] = self.request_counter
 
@@ -58,12 +57,19 @@ class RequestLogger:
         filename = f"{timestamp}_{self.request_counter:03d}_{url_path}_{flow.request.method}.jsonl"
         file_path = self.log_dir / filename
 
-        # Open file and store handle
+        # Open file and store handle (don't write yet, waiting for body)
         f = open(file_path, "w", buffering=1)
         self.flow_files[flow.id] = (f, False)
 
-        # Build and write request JSON object
+    def request(self, flow: http.HTTPFlow) -> None:
+        """Write request with body once it's available."""
+        if flow.id not in self.flow_files:
+            return
+
+        f, _ = self.flow_files[flow.id]
         req = flow.request
+
+        # Build request JSON object
         request_obj = {
             "method": req.method,
             "url": req.url,
@@ -72,7 +78,7 @@ class RequestLogger:
             "headers": dict(req.headers),
         }
 
-        # Handle request body (won't be available yet for most requests)
+        # Handle request body
         if req.content:
             try:
                 request_obj["body"] = json.loads(req.content.decode("utf-8"))
@@ -81,6 +87,7 @@ class RequestLogger:
                     request_obj["body"] = req.content.decode("utf-8", errors="replace")
                 except Exception:
                     import base64
+
                     request_obj["body"] = base64.b64encode(req.content).decode("ascii")
                     request_obj["body_encoding"] = "base64"
         else:
@@ -118,7 +125,10 @@ class RequestLogger:
 
             if line.startswith("event: "):
                 # If we already have an event/data pair, flush it first
-                if buffer_state["event"] is not None and buffer_state["data"] is not None:
+                if (
+                    buffer_state["event"] is not None
+                    and buffer_state["data"] is not None
+                ):
                     self._flush_sse_event(buffer_state, file_handle)
                 buffer_state["event"] = line[7:]  # Remove "event: " prefix
 
@@ -132,7 +142,10 @@ class RequestLogger:
 
             elif line == "":
                 # Empty line signals end of event
-                if buffer_state["event"] is not None or buffer_state["data"] is not None:
+                if (
+                    buffer_state["event"] is not None
+                    or buffer_state["data"] is not None
+                ):
                     self._flush_sse_event(buffer_state, file_handle)
 
     def _flush_sse_event(self, buffer_state, file_handle):
@@ -221,6 +234,7 @@ class RequestLogger:
                     body_obj["body"] = resp.content.decode("utf-8", errors="replace")
                 except Exception:
                     import base64
+
                     body_obj["body"] = base64.b64encode(resp.content).decode("ascii")
                     body_obj["body_encoding"] = "base64"
 
@@ -302,12 +316,6 @@ def main():
     # Check if command is provided
     if len(sys.argv) < 2:
         print("Usage: python main.py <command> [args...]", file=sys.stderr)
-        print("Example: python main.py mycli --option value", file=sys.stderr)
-        print("\nEnvironment variables:", file=sys.stderr)
-        print(
-            "  LLMSPY_UPSTREAM - Upstream target for reverse proxy mode (e.g., https://api.example.com)",
-            file=sys.stderr,
-        )
         sys.exit(1)
 
     # Extract command and arguments
@@ -319,24 +327,16 @@ def main():
     log_dir = f"llm-requests-{timestamp}"
     Path(log_dir).mkdir(parents=True, exist_ok=True)
 
-    # Check for reverse proxy mode
-    upstream = os.environ.get("LLMSPY_UPSTREAM")
-    if not upstream:
-        raise ValueError("LLMSPY_UPSTREAM environment variable is not set")
-
-    print(
-        f"Starting reverse proxy on port {proxy_port} -> {upstream}...",
-        file=sys.stderr,
-    )
+    if sys.argv[1] == "claude":
+        upstream = "https://api.anthropic.com"
+    else:
+        raise ValueError(f"Unknown command: {sys.argv[1]}")
 
     # Start the proxy server
     _proxy_thread = start_proxy_thread(proxy_port, log_dir, upstream)
 
-    # Give the proxy a moment to start
-    time.sleep(2)
-
-    print(f"Running command: {' '.join(command)}", file=sys.stderr)
-    print(f"HTTP requests will be logged to: {log_dir}/\n", file=sys.stderr)
+    # print(f"Running command: {' '.join(command)}", file=sys.stderr)
+    # print(f"HTTP requests will be logged to: {log_dir}/\n", file=sys.stderr)
 
     # Run the command with proxy configured
     try:
