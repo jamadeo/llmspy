@@ -9,5 +9,5 @@ wheels/
 # Virtual environments
 .venv
 
-# HTTP request logs
-http_requests.log
+# LLM request logs
+llm-requests-*

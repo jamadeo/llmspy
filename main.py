@@ -22,6 +22,7 @@ class RequestLogger:
         self.request_counter = 0
         self.flow_files = {}  # Map flow.id -> (file_handle, is_streaming)
         self.flow_counter = {}  # Map flow.id -> counter
+        self.sse_buffers = {}  # Map flow.id -> SSE buffer state
 
     def _get_sanitized_path(self, url):
         """Extract and sanitize URL path for filename."""
@@ -95,6 +96,69 @@ class RequestLogger:
         # This will be called for the streaming flow
         return chunk
 
+    def _parse_sse_chunk(self, flow_id, chunk_text, file_handle):
+        """Parse SSE chunk and write complete events to file."""
+        if flow_id not in self.sse_buffers:
+            self.sse_buffers[flow_id] = {
+                "buffer": "",
+                "event": None,
+                "data": None,
+            }
+
+        buffer_state = self.sse_buffers[flow_id]
+        buffer_state["buffer"] += chunk_text
+
+        # Process complete lines
+        lines = buffer_state["buffer"].split("\n")
+        # Keep the last incomplete line in the buffer
+        buffer_state["buffer"] = lines[-1]
+
+        for line in lines[:-1]:
+            line = line.rstrip("\r")
+
+            if line.startswith("event: "):
+                # If we already have an event/data pair, flush it first
+                if buffer_state["event"] is not None and buffer_state["data"] is not None:
+                    self._flush_sse_event(buffer_state, file_handle)
+                buffer_state["event"] = line[7:]  # Remove "event: " prefix
+
+            elif line.startswith("data: "):
+                data_line = line[6:]  # Remove "data: " prefix
+                if buffer_state["data"] is None:
+                    buffer_state["data"] = data_line
+                else:
+                    # Multiple data lines - append with newline
+                    buffer_state["data"] += "\n" + data_line
+
+            elif line == "":
+                # Empty line signals end of event
+                if buffer_state["event"] is not None or buffer_state["data"] is not None:
+                    self._flush_sse_event(buffer_state, file_handle)
+
+    def _flush_sse_event(self, buffer_state, file_handle):
+        """Flush a complete SSE event to the log file."""
+        event_obj = {}
+
+        if buffer_state["event"] is not None:
+            event_obj["event"] = buffer_state["event"]
+
+        if buffer_state["data"] is not None:
+            # Try to parse data as JSON
+            try:
+                event_obj["data"] = json.loads(buffer_state["data"])
+            except json.JSONDecodeError:
+                # If not JSON, keep as string
+                event_obj["data"] = buffer_state["data"]
+
+        # Only write if we have something
+        if event_obj:
+            file_handle.write(json.dumps(event_obj) + "\n")
+            file_handle.flush()
+
+        # Reset buffer state
+        buffer_state["event"] = None
+        buffer_state["data"] = None
+
     def responseheaders(self, flow: http.HTTPFlow) -> None:
         """Write response metadata and enable streaming if needed."""
         if flow.id not in self.flow_files:
@@ -126,9 +190,7 @@ class RequestLogger:
                     if isinstance(chunk, bytes) and chunk:
                         try:
                             decoded = chunk.decode("utf-8", errors="replace")
-                            chunk_obj = {"chunk": decoded}
-                            file_handle.write(json.dumps(chunk_obj) + "\n")
-                            file_handle.flush()
+                            self._parse_sse_chunk(flow_id, decoded, file_handle)
                         except Exception:
                             pass
                 return chunk
@@ -142,6 +204,12 @@ class RequestLogger:
 
         f, is_streaming = self.flow_files[flow.id]
         resp = flow.response
+
+        # For streaming responses, flush any remaining buffered SSE data
+        if is_streaming and flow.id in self.sse_buffers:
+            buffer_state = self.sse_buffers[flow.id]
+            if buffer_state["event"] is not None or buffer_state["data"] is not None:
+                self._flush_sse_event(buffer_state, f)
 
         # For non-streaming responses, write the body now
         if not is_streaming and resp and resp.content:
@@ -159,11 +227,13 @@ class RequestLogger:
             f.write(json.dumps(body_obj) + "\n")
             f.flush()
 
-        # Close the file
+        # Close the file and cleanup
         f.close()
         del self.flow_files[flow.id]
         if flow.id in self.flow_counter:
             del self.flow_counter[flow.id]
+        if flow.id in self.sse_buffers:
+            del self.sse_buffers[flow.id]
 
     def error(self, flow: http.HTTPFlow) -> None:
         """Handle errors by closing the log file."""
@@ -176,6 +246,8 @@ class RequestLogger:
             del self.flow_files[flow.id]
             if flow.id in self.flow_counter:
                 del self.flow_counter[flow.id]
+            if flow.id in self.sse_buffers:
+                del self.sse_buffers[flow.id]
 
 
 async def run_proxy(port: int, log_dir: str, upstream: str):
