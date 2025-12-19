@@ -37,17 +37,39 @@
             margin-bottom: 15px;
         }
 
-        .file-input-wrapper {
+        .file-select-wrapper {
             display: flex;
             gap: 10px;
             align-items: center;
         }
 
-        input[type="file"] {
+        select {
             padding: 8px 12px;
             border: 2px solid #e0e0e0;
             border-radius: 4px;
             font-size: 14px;
+            min-width: 400px;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+        }
+
+        button {
+            padding: 8px 16px;
+            background: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        button:hover {
+            background: #0052a3;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
         }
 
         .content {
@@ -228,9 +250,11 @@
     <div class="container">
         <header>
             <h1>🔍 LLM Requests Viewer</h1>
-            <div class="file-input-wrapper">
-                <input type="file" id="fileInput" accept=".jsonl" />
-                <span id="fileName"></span>
+            <div class="file-select-wrapper">
+                <select id="fileSelect">
+                    <option value="">Loading files...</option>
+                </select>
+                <button id="loadButton" disabled>Load</button>
             </div>
         </header>
 
@@ -243,31 +267,66 @@
     </div>
 
     <script>
-        const fileInput = document.getElementById('fileInput');
+        const fileSelect = document.getElementById('fileSelect');
+        const loadButton = document.getElementById('loadButton');
         const content = document.getElementById('content');
-        const fileNameDisplay = document.getElementById('fileName');
 
-        fileInput.addEventListener('change', handleFileSelect);
+        // Load available files on page load
+        loadFileList();
 
-        async function handleFileSelect(event) {
-            const file = event.target.files[0];
-            if (!file) return;
+        loadButton.addEventListener('click', handleLoadFile);
+        fileSelect.addEventListener('change', () => {
+            loadButton.disabled = !fileSelect.value;
+        });
 
-            fileNameDisplay.textContent = file.name;
+        async function loadFileList() {
+            try {
+                const response = await fetch('/api/files');
+                const files = await response.json();
 
-            const text = await file.text();
-            const lines = text.trim().split('\n').filter(line => line.trim());
+                if (files.length === 0) {
+                    fileSelect.innerHTML = '<option value="">No log files found</option>';
+                    return;
+                }
 
-            if (lines.length < 2) {
-                content.innerHTML = '<div class="empty-state"><p>Invalid file format</p></div>';
-                return;
+                fileSelect.innerHTML = '<option value="">Select a file...</option>';
+                files.forEach(file => {
+                    const option = document.createElement('option');
+                    option.value = file.name;
+                    option.textContent = file.name;
+                    fileSelect.appendChild(option);
+                });
+
+                loadButton.disabled = true;
+            } catch (error) {
+                console.error('Error loading files:', error);
+                fileSelect.innerHTML = '<option value="">Error loading files</option>';
             }
+        }
 
-            const request = JSON.parse(lines[0]);
-            const response = JSON.parse(lines[1]);
-            const events = lines.slice(2).map(line => JSON.parse(line));
+        async function handleLoadFile() {
+            const filename = fileSelect.value;
+            if (!filename) return;
 
-            renderContent(request, response, events);
+            try {
+                const response = await fetch(`/api/file/${encodeURIComponent(filename)}`);
+                const text = await response.text();
+                const lines = text.trim().split('\n').filter(line => line.trim());
+
+                if (lines.length < 2) {
+                    content.innerHTML = '<div class="empty-state"><p>Invalid file format</p></div>';
+                    return;
+                }
+
+                const request = JSON.parse(lines[0]);
+                const response_data = JSON.parse(lines[1]);
+                const events = lines.slice(2).map(line => JSON.parse(line));
+
+                renderContent(request, response_data, events);
+            } catch (error) {
+                console.error('Error loading file:', error);
+                content.innerHTML = '<div class="empty-state"><p>Error loading file</p></div>';
+            }
         }
 
         function renderContent(request, response, events) {

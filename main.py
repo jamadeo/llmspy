@@ -6,8 +6,11 @@ import sys
 import threading
 from datetime import datetime
 from pathlib import Path
+import http.server
+import socketserver
+from urllib.parse import urlparse
 
-from mitmproxy import http
+from mitmproxy import http as mitmhttp
 from mitmproxy.options import Options
 from mitmproxy.tools.dump import DumpMaster
 
@@ -46,7 +49,7 @@ class RequestLogger:
 
         return url_path
 
-    def requestheaders(self, flow: http.HTTPFlow) -> None:
+    def requestheaders(self, flow: mitmhttp.HTTPFlow) -> None:
         """Create log file for this request."""
         self.request_counter += 1
         self.flow_counter[flow.id] = self.request_counter
@@ -61,7 +64,7 @@ class RequestLogger:
         f = open(file_path, "w", buffering=1)
         self.flow_files[flow.id] = (f, False)
 
-    def request(self, flow: http.HTTPFlow) -> None:
+    def request(self, flow: mitmhttp.HTTPFlow) -> None:
         """Write request with body once it's available."""
         if flow.id not in self.flow_files:
             return
@@ -172,7 +175,7 @@ class RequestLogger:
         buffer_state["event"] = None
         buffer_state["data"] = None
 
-    def responseheaders(self, flow: http.HTTPFlow) -> None:
+    def responseheaders(self, flow: mitmhttp.HTTPFlow) -> None:
         """Write response metadata and enable streaming if needed."""
         if flow.id not in self.flow_files:
             return
@@ -210,7 +213,7 @@ class RequestLogger:
 
             flow.response.stream = stream_chunk_closure
 
-    def response(self, flow: http.HTTPFlow) -> None:
+    def response(self, flow: mitmhttp.HTTPFlow) -> None:
         """Finalize log file after response is complete."""
         if flow.id not in self.flow_files:
             return
@@ -249,7 +252,7 @@ class RequestLogger:
         if flow.id in self.sse_buffers:
             del self.sse_buffers[flow.id]
 
-    def error(self, flow: http.HTTPFlow) -> None:
+    def error(self, flow: mitmhttp.HTTPFlow) -> None:
         """Handle errors by closing the log file."""
         if flow.id in self.flow_files:
             f, _ = self.flow_files[flow.id]
@@ -296,6 +299,100 @@ def start_proxy_thread(port: int, log_dir: str, upstream: str):
     return proxy_thread
 
 
+class ViewerRequestHandler(http.server.SimpleHTTPRequestHandler):
+    """Custom request handler for serving the viewer and log files."""
+
+    log_dir = None
+
+    def do_GET(self):
+        """Handle GET requests."""
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
+
+        if path == "/" or path == "/index.html":
+            self.serve_viewer()
+        elif path == "/api/files":
+            self.list_files()
+        elif path.startswith("/api/file/"):
+            filename = path[len("/api/file/"):]
+            self.serve_log_file(filename)
+        else:
+            self.send_error(404, "Not Found")
+
+    def serve_viewer(self):
+        """Serve the viewer HTML page."""
+        viewer_path = Path(__file__).parent / "viewer.html"
+
+        if not viewer_path.exists():
+            self.send_error(500, "Viewer file not found")
+            return
+
+        self.send_response(200)
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
+
+        with open(viewer_path, "rb") as f:
+            self.wfile.write(f.read())
+
+    def list_files(self):
+        """List all .jsonl files in the log directory."""
+        try:
+            files = []
+            for file_path in sorted(Path(self.log_dir).glob("*.jsonl"), reverse=True):
+                files.append({
+                    "name": file_path.name,
+                    "size": file_path.stat().st_size,
+                    "modified": file_path.stat().st_mtime,
+                })
+
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(files).encode())
+        except Exception as e:
+            self.send_error(500, f"Error listing files: {e}")
+
+    def serve_log_file(self, filename):
+        """Serve a specific log file."""
+        try:
+            # Security: prevent directory traversal
+            if ".." in filename or "/" in filename or "\\" in filename:
+                self.send_error(403, "Invalid filename")
+                return
+
+            file_path = Path(self.log_dir) / filename
+
+            if not file_path.exists() or not file_path.is_file():
+                self.send_error(404, "File not found")
+                return
+
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+
+            with open(file_path, "rb") as f:
+                self.wfile.write(f.read())
+        except Exception as e:
+            self.send_error(500, f"Error reading file: {e}")
+
+    def log_message(self, format, *args):
+        """Suppress log messages."""
+        pass
+
+
+def start_viewer_server(log_dir: str, port: int):
+    """Start the HTTP server in a separate thread."""
+    ViewerRequestHandler.log_dir = log_dir
+
+    def run_server():
+        with socketserver.TCPServer(("", port), ViewerRequestHandler) as httpd:
+            httpd.serve_forever()
+
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+    return server_thread
+
+
 def run_command_with_proxy(command: list[str], proxy_port: int):
     """Run a command with proxy environment variables set."""
     # Set up environment with proxy configuration
@@ -335,8 +432,12 @@ def main():
     # Start the proxy server
     _proxy_thread = start_proxy_thread(proxy_port, log_dir, upstream)
 
-    # print(f"Running command: {' '.join(command)}", file=sys.stderr)
-    # print(f"HTTP requests will be logged to: {log_dir}/\n", file=sys.stderr)
+    # Start the viewer server
+    viewer_port = 8001
+    _viewer_thread = start_viewer_server(log_dir, viewer_port)
+
+    print(f"Viewer: http://localhost:{viewer_port}", file=sys.stderr)
+    print(f"Logs: {log_dir}/\n", file=sys.stderr)
 
     # Run the command with proxy configured
     try:
