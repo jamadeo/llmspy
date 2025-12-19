@@ -48,59 +48,75 @@ class RequestLogger:
 
         # Create unique filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        filename = f"{timestamp}_{self.request_counter:03d}_{url_path}_{flow.request.method}.log"
+        filename = f"{timestamp}_{self.request_counter:03d}_{url_path}_{flow.request.method}.jsonl"
         file_path = self.log_dir / filename
 
-        # Write request and response to file
+        # Write request and response to file in JSONL format
         with open(file_path, "w") as f:
             req = flow.request
             resp = flow.response
 
-            # Log request
-            print(f"{'=' * 80}", file=f)
-            print("REQUEST", file=f)
-            print(f"{'=' * 80}", file=f)
-            print(f"Method: {req.method}", file=f)
-            print(f"URL: {req.url}", file=f)
-            print(f"Host: {req.host}:{req.port}", file=f)
-            print("\nRequest Headers:", file=f)
-            for name, value in req.headers.items():
-                print(f"  {name}: {value}", file=f)
+            # Build request JSON object
+            request_obj = {
+                "method": req.method,
+                "url": req.url,
+                "host": req.host,
+                "port": req.port,
+                "headers": dict(req.headers),
+            }
 
+            # Handle request body
             if req.content:
-                print(f"\nRequest Body ({len(req.content)} bytes):", file=f)
-                print("-" * 80, file=f)
                 try:
-                    body_text = req.content.decode("utf-8", errors="replace")
-                    print(body_text, file=f)
-                except Exception as e:
-                    print(f"[Error decoding body: {e}]", file=f)
-                    print(f"Body (first 200 bytes): {req.content[:200]!r}", file=f)
-
-            # Log response
-            if resp:
-                print(f"\n{'=' * 80}", file=f)
-                print("RESPONSE", file=f)
-                print(f"{'=' * 80}", file=f)
-                print(f"Status: {resp.status_code} {resp.reason}", file=f)
-                print("\nResponse Headers:", file=f)
-                for name, value in resp.headers.items():
-                    print(f"  {name}: {value}", file=f)
-
-                if resp.content:
-                    print(f"\nResponse Body ({len(resp.content)} bytes):", file=f)
-                    print("-" * 80, file=f)
+                    # Try to parse as JSON
+                    request_obj["body"] = json.loads(req.content.decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    # If not JSON, try to decode as string
                     try:
-                        body_text = resp.content.decode("utf-8", errors="replace")
-                        print(body_text, file=f)
-                    except Exception as e:
-                        print(f"[Error decoding body: {e}]", file=f)
-                        print(f"Body (first 200 bytes): {resp.content[:200]!r}", file=f)
+                        request_obj["body"] = req.content.decode("utf-8", errors="replace")
+                    except Exception:
+                        # If all else fails, include as base64
+                        import base64
+                        request_obj["body"] = base64.b64encode(req.content).decode("ascii")
+                        request_obj["body_encoding"] = "base64"
             else:
-                print(f"\n{'=' * 80}", file=f)
-                print("WARNING: No response received", file=f)
+                request_obj["body"] = None
 
-            print(f"\n{'=' * 80}", file=f)
+            # Write request line
+            f.write(json.dumps(request_obj) + "\n")
+
+            # Build response JSON object
+            if resp:
+                response_obj = {
+                    "status_code": resp.status_code,
+                    "reason": resp.reason,
+                    "headers": dict(resp.headers),
+                }
+
+                # Handle response body
+                if resp.content:
+                    try:
+                        # Try to parse as JSON
+                        response_obj["body"] = json.loads(resp.content.decode("utf-8"))
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        # If not JSON, try to decode as string
+                        try:
+                            response_obj["body"] = resp.content.decode("utf-8", errors="replace")
+                        except Exception:
+                            # If all else fails, include as base64
+                            import base64
+                            response_obj["body"] = base64.b64encode(resp.content).decode("ascii")
+                            response_obj["body_encoding"] = "base64"
+                else:
+                    response_obj["body"] = None
+            else:
+                response_obj = {"error": "No response received"}
+
+            # Write response line
+            f.write(json.dumps(response_obj) + "\n")
+
+        # Print to stderr so user knows where the log was saved
+        print(f"Logged: {file_path}", file=sys.stderr)
 
 
 async def run_proxy(port: int, log_dir: str, upstream: str):
