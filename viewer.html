@@ -102,33 +102,10 @@
             word-break: break-all;
         }
 
-        .headers {
-            background: #f9f9f9;
-            padding: 12px;
-            border-radius: 4px;
-            margin-top: 10px;
-            max-height: 200px;
-            overflow-y: auto;
-        }
-
         .headers-title {
             font-weight: bold;
             margin-bottom: 8px;
             color: #666;
-        }
-
-        .header-item {
-            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
-            font-size: 12px;
-            margin-bottom: 4px;
-            padding: 4px;
-            background: white;
-            border-radius: 2px;
-        }
-
-        .header-name {
-            color: #0066cc;
-            font-weight: bold;
         }
 
         .events-container {
@@ -330,16 +307,7 @@
                         <div class="json-body">
                             <pre>${JSON.stringify(request.body, null, 2)}</pre>
                         </div>
-                    ` : ''}
-
-                    <div class="headers">
-                        <div class="headers-title">Request Headers (${Object.keys(request.headers).length}):</div>
-                        ${Object.entries(request.headers).map(([name, value]) => `
-                            <div class="header-item">
-                                <span class="header-name">${escapeHtml(name)}:</span> ${escapeHtml(value)}
-                            </div>
-                        `).join('')}
-                    </div>
+                    ` : '<p style="color: #999; margin-top: 15px;">No request body</p>'}
                 </div>
 
                 <!-- Response Section -->
@@ -354,15 +322,6 @@
                                 </span>
                             </span>
                         </div>
-                    </div>
-
-                    <div class="headers">
-                        <div class="headers-title">Response Headers (${Object.keys(response.headers).length}):</div>
-                        ${Object.entries(response.headers).map(([name, value]) => `
-                            <div class="header-item">
-                                <span class="header-name">${escapeHtml(name)}:</span> ${escapeHtml(value)}
-                            </div>
-                        `).join('')}
                     </div>
 
                     ${accumulatedText ? `
