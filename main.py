@@ -44,6 +44,14 @@ class RequestLogger:
 
         return url_path
 
+    def stream_chunk(self, chunk: bytes) -> bytes:
+        # Process chunk here
+        return chunk
+
+    def responseheaders(self, flow: http.HTTPFlow) -> None:
+        if "text/event-stream" in flow.response.headers.get("Content-Type", ""):
+            flow.response.stream = self.stream_chunk
+
     def response(self, flow: http.HTTPFlow) -> None:
         """Log complete HTTP request/response pair to individual file in JSONL format."""
         self.request_counter += 1
@@ -74,10 +82,15 @@ class RequestLogger:
                     request_obj["body"] = json.loads(req.content.decode("utf-8"))
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     try:
-                        request_obj["body"] = req.content.decode("utf-8", errors="replace")
+                        request_obj["body"] = req.content.decode(
+                            "utf-8", errors="replace"
+                        )
                     except Exception:
                         import base64
-                        request_obj["body"] = base64.b64encode(req.content).decode("ascii")
+
+                        request_obj["body"] = base64.b64encode(req.content).decode(
+                            "ascii"
+                        )
                         request_obj["body_encoding"] = "base64"
             else:
                 request_obj["body"] = None
@@ -99,10 +112,15 @@ class RequestLogger:
                         response_obj["body"] = json.loads(resp.content.decode("utf-8"))
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         try:
-                            response_obj["body"] = resp.content.decode("utf-8", errors="replace")
+                            response_obj["body"] = resp.content.decode(
+                                "utf-8", errors="replace"
+                            )
                         except Exception:
                             import base64
-                            response_obj["body"] = base64.b64encode(resp.content).decode("ascii")
+
+                            response_obj["body"] = base64.b64encode(
+                                resp.content
+                            ).decode("ascii")
                             response_obj["body_encoding"] = "base64"
                 else:
                     response_obj["body"] = None
