@@ -47,9 +47,14 @@
             padding: 8px 12px;
             border: 2px solid #e0e0e0;
             border-radius: 4px;
-            font-size: 14px;
-            min-width: 400px;
+            font-size: 13px;
+            min-width: 500px;
             font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+        }
+
+        .file-size {
+            color: #999;
+            font-size: 11px;
         }
 
         button {
@@ -181,6 +186,39 @@
             word-break: break-word;
         }
 
+        .event-text {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            color: #333;
+            background: #f5f5f5;
+            padding: 8px;
+            border-radius: 3px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .events-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .toggle-view-btn {
+            padding: 6px 12px;
+            background: #f0f0f0;
+            color: #333;
+            border: 1px solid #d0d0d0;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+            font-weight: normal;
+        }
+
+        .toggle-view-btn:hover {
+            background: #e0e0e0;
+        }
+
         .accumulated-text {
             background: #fff;
             padding: 15px;
@@ -279,6 +317,12 @@
             loadButton.disabled = !fileSelect.value;
         });
 
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
         async function loadFileList() {
             try {
                 const response = await fetch('/api/files');
@@ -293,7 +337,7 @@
                 files.forEach(file => {
                     const option = document.createElement('option');
                     option.value = file.name;
-                    option.textContent = file.name;
+                    option.textContent = `${file.name} (${formatFileSize(file.size)})`;
                     fileSelect.appendChild(option);
                 });
 
@@ -329,7 +373,47 @@
             }
         }
 
+        let showRawJSON = false;
+
+        function toggleEventView() {
+            showRawJSON = !showRawJSON;
+            const btn = document.getElementById('toggleViewBtn');
+            btn.textContent = showRawJSON ? 'Show Text View' : 'Show Raw JSON';
+
+            // Re-render events
+            const eventsContainer = document.querySelector('.events-container');
+            const currentEvents = window.currentEvents || [];
+            eventsContainer.innerHTML = renderEvents(currentEvents);
+        }
+
+        function renderEvents(events) {
+            return events.map((event, index) => {
+                const hasDeltaText = event.data?.delta?.text;
+
+                let content;
+                if (!showRawJSON && hasDeltaText) {
+                    content = `<div class="event-text">${escapeHtml(event.data.delta.text)}</div>`;
+                } else {
+                    content = `<div class="event-data"><pre>${JSON.stringify(event.data, null, 2)}</pre></div>`;
+                }
+
+                return `
+                    <div class="event">
+                        <div class="event-header">
+                            <span class="event-type">${escapeHtml(event.event || 'unknown')}</span>
+                            <span class="event-index">#${index + 1}</span>
+                        </div>
+                        ${content}
+                    </div>
+                `;
+            }).join('');
+        }
+
         function renderContent(request, response, events) {
+            // Store events globally for toggle
+            window.currentEvents = events;
+            showRawJSON = false;
+
             // Accumulate text from streaming events
             let accumulatedText = '';
             events.forEach(event => {
@@ -392,19 +476,12 @@
                 <!-- Events Section -->
                 ${events.length > 0 ? `
                     <div class="section" style="grid-column: 1 / -1;">
-                        <h2>📡 Streaming Events (${events.length})</h2>
+                        <div class="events-header">
+                            <h2 style="margin: 0;">📡 Streaming Events (${events.length})</h2>
+                            <button id="toggleViewBtn" class="toggle-view-btn" onclick="toggleEventView()">Show Raw JSON</button>
+                        </div>
                         <div class="events-container">
-                            ${events.map((event, index) => `
-                                <div class="event">
-                                    <div class="event-header">
-                                        <span class="event-type">${escapeHtml(event.event || 'unknown')}</span>
-                                        <span class="event-index">#${index + 1}</span>
-                                    </div>
-                                    <div class="event-data">
-                                        <pre>${JSON.stringify(event.data, null, 2)}</pre>
-                                    </div>
-                                </div>
-                            `).join('')}
+                            ${renderEvents(events)}
                         </div>
                     </div>
                 ` : ''}
