@@ -1,13 +1,14 @@
 import asyncio
+import http.server
 import json
 import os
+import socketserver
 import subprocess
 import sys
 import threading
+import webbrowser
 from datetime import datetime
 from pathlib import Path
-import http.server
-import socketserver
 from urllib.parse import urlparse
 
 from mitmproxy import http as mitmhttp
@@ -314,7 +315,7 @@ class ViewerRequestHandler(http.server.SimpleHTTPRequestHandler):
         elif path == "/api/files":
             self.list_files()
         elif path.startswith("/api/file/"):
-            filename = path[len("/api/file/"):]
+            filename = path[len("/api/file/") :]
             self.serve_log_file(filename)
         else:
             self.send_error(404, "Not Found")
@@ -339,11 +340,13 @@ class ViewerRequestHandler(http.server.SimpleHTTPRequestHandler):
         try:
             files = []
             for file_path in sorted(Path(self.log_dir).glob("*.jsonl"), reverse=True):
-                files.append({
-                    "name": file_path.name,
-                    "size": file_path.stat().st_size,
-                    "modified": file_path.stat().st_mtime,
-                })
+                files.append(
+                    {
+                        "name": file_path.name,
+                        "size": file_path.stat().st_size,
+                        "modified": file_path.stat().st_mtime,
+                    }
+                )
 
             self.send_response(200)
             self.send_header("Content-type", "application/json")
@@ -437,6 +440,7 @@ def main():
     _viewer_thread = start_viewer_server(log_dir, viewer_port)
 
     print(f"Viewer: http://localhost:{viewer_port}", file=sys.stderr)
+    webbrowser.open(f"http://localhost:{viewer_port}")
     print(f"Logs: {log_dir}/\n", file=sys.stderr)
 
     # Run the command with proxy configured
