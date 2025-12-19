@@ -2,6 +2,7 @@ import asyncio
 import http.server
 import json
 import os
+import socket
 import socketserver
 import subprocess
 import sys
@@ -396,6 +397,15 @@ def start_viewer_server(log_dir: str, port: int):
     return server_thread
 
 
+def get_available_port():
+    """Find and return an available port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        s.listen(1)
+        port = s.getsockname()[1]
+    return port
+
+
 def run_command_with_proxy(command: list[str], proxy_port: int):
     """Run a command with proxy environment variables set."""
     # Set up environment with proxy configuration
@@ -420,7 +430,10 @@ def main():
 
     # Extract command and arguments
     command = sys.argv[1:]
-    proxy_port = 8080
+
+    # Get available ports
+    proxy_port = get_available_port()
+    viewer_port = 8779
 
     # Create timestamped log directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -436,9 +449,9 @@ def main():
     _proxy_thread = start_proxy_thread(proxy_port, log_dir, upstream)
 
     # Start the viewer server
-    viewer_port = 8001
     _viewer_thread = start_viewer_server(log_dir, viewer_port)
 
+    print(f"Proxy: http://localhost:{proxy_port}", file=sys.stderr)
     print(f"Viewer: http://localhost:{viewer_port}", file=sys.stderr)
     webbrowser.open(f"http://localhost:{viewer_port}")
     print(f"Logs: {log_dir}/\n", file=sys.stderr)
