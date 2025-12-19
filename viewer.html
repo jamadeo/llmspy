@@ -35,31 +35,111 @@
         h1 {
             font-size: 24px;
             margin-bottom: 15px;
-        }
-
-        .file-select-wrapper {
             display: flex;
-            gap: 10px;
             align-items: center;
+            gap: 12px;
         }
 
-        select {
-            padding: 8px 12px;
-            border: 2px solid #e0e0e0;
+        .live-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #2e7d32;
+            font-weight: normal;
+        }
+
+        .live-dot {
+            width: 8px;
+            height: 8px;
+            background: #4caf50;
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .carousel-wrapper {
+            position: relative;
+        }
+
+        .carousel-container {
+            display: flex;
+            gap: 12px;
+            overflow-x: auto;
+            padding: 10px 0;
+            scroll-behavior: smooth;
+        }
+
+        .carousel-container::-webkit-scrollbar {
+            height: 8px;
+        }
+
+        .carousel-container::-webkit-scrollbar-track {
+            background: #f0f0f0;
             border-radius: 4px;
-            font-size: 13px;
-            min-width: 500px;
-            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+        }
+
+        .carousel-container::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 4px;
+        }
+
+        .carousel-container::-webkit-scrollbar-thumb:hover {
+            background: #999;
+        }
+
+        .file-tile {
+            min-width: 280px;
+            padding: 12px 16px;
+            background: #f9f9f9;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
             cursor: pointer;
+            transition: all 0.2s;
+            flex-shrink: 0;
         }
 
-        select:hover {
+        .file-tile:hover {
+            background: #f0f0f0;
             border-color: #0066cc;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
 
-        .file-size {
-            color: #999;
+        .file-tile.selected {
+            background: #e3f2fd;
+            border-color: #0066cc;
+            border-width: 2px;
+        }
+
+        .file-tile-name {
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            font-size: 12px;
+            color: #333;
+            margin-bottom: 6px;
+            word-break: break-all;
+        }
+
+        .file-tile-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             font-size: 11px;
+            color: #999;
+        }
+
+        .file-tile-size {
+            font-weight: 500;
+        }
+
+        .loading-message {
+            color: #999;
+            font-style: italic;
+            padding: 12px;
         }
 
         .content {
@@ -347,11 +427,17 @@
 <body>
     <div class="container">
         <header>
-            <h1>🔍 LLM Requests Viewer</h1>
-            <div class="file-select-wrapper">
-                <select id="fileSelect">
-                    <option value="">Loading files...</option>
-                </select>
+            <h1>
+                🔍 LLM Requests Viewer
+                <span class="live-indicator">
+                    <span class="live-dot"></span>
+                    LIVE
+                </span>
+            </h1>
+            <div class="carousel-wrapper">
+                <div class="carousel-container" id="carouselContainer">
+                    <div class="loading-message">Loading files...</div>
+                </div>
             </div>
         </header>
 
@@ -364,14 +450,20 @@
     </div>
 
     <script>
-        const fileSelect = document.getElementById('fileSelect');
+        const carouselContainer = document.getElementById('carouselContainer');
         const content = document.getElementById('content');
+        let selectedFilename = null;
+        let lastLineCount = 0;
+        let pollingInterval = null;
+        let fileListPollingInterval = null;
+        let userHasExplicitlySelected = false;
+        let previousFileCount = 0;
 
         // Load available files on page load
         loadFileList();
 
-        // Auto-load file when selection changes
-        fileSelect.addEventListener('change', handleLoadFile);
+        // Poll for new files every 2 seconds
+        fileListPollingInterval = setInterval(loadFileList, 2000);
 
         function formatFileSize(bytes) {
             if (bytes < 1024) return bytes + ' B';
@@ -379,40 +471,124 @@
             return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
         }
 
+        function formatTimestamp(filename) {
+            // Extract timestamp from filename like "20251219_101055_820371_003_..."
+            const match = filename.match(/^(\d{8})_(\d{6})/);
+            if (match) {
+                const date = match[1]; // YYYYMMDD
+                const time = match[2]; // HHMMSS
+                return `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)} ${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4, 6)}`;
+            }
+            return '';
+        }
+
         async function loadFileList() {
             try {
                 const response = await fetch('/api/files');
                 const files = await response.json();
 
-                if (files.length === 0) {
-                    fileSelect.innerHTML = '<option value="">No log files found</option>';
+                // Filter to only show /v1/messages requests
+                const filteredFiles = files.filter(file => file.name.includes('_v1_messages_'));
+
+                if (filteredFiles.length === 0) {
+                    carouselContainer.innerHTML = '<div class="loading-message">No log files found</div>';
                     return;
                 }
 
-                fileSelect.innerHTML = '<option value="">Select a file...</option>';
-                files.forEach(file => {
-                    const option = document.createElement('option');
-                    option.value = file.name;
-                    option.textContent = `${file.name} (${formatFileSize(file.size)})`;
-                    fileSelect.appendChild(option);
+                const previousSelection = selectedFilename;
+                carouselContainer.innerHTML = '';
+
+                // Reverse to show oldest to newest (left to right)
+                const reversedFiles = [...filteredFiles].reverse();
+
+                reversedFiles.forEach((file, index) => {
+                    const tile = document.createElement('div');
+                    tile.className = 'file-tile';
+                    tile.dataset.filename = file.name;
+
+                    const timestamp = formatTimestamp(file.name);
+                    const requestNumber = index + 1;
+
+                    tile.innerHTML = `
+                        <div class="file-tile-name">Request #${requestNumber}</div>
+                        <div class="file-tile-meta">
+                            <span class="file-tile-size">${formatFileSize(file.size)}</span>
+                            ${timestamp ? `<span>${timestamp}</span>` : ''}
+                        </div>
+                    `;
+
+                    tile.addEventListener('click', () => selectFile(file.name, tile, true));
+                    carouselContainer.appendChild(tile);
+
+                    // Restore previous selection
+                    if (file.name === previousSelection) {
+                        tile.classList.add('selected');
+                    }
                 });
+
+                // Check if new file arrived
+                const newFileArrived = reversedFiles.length > previousFileCount;
+                previousFileCount = reversedFiles.length;
+
+                // Auto-select last file on first load or when new file arrives without explicit selection
+                if (reversedFiles.length > 0 && (!previousSelection || (newFileArrived && !userHasExplicitlySelected))) {
+                    const tiles = carouselContainer.querySelectorAll('.file-tile');
+                    const lastTile = tiles[tiles.length - 1];
+                    selectFile(reversedFiles[reversedFiles.length - 1].name, lastTile, false);
+                }
             } catch (error) {
                 console.error('Error loading files:', error);
-                fileSelect.innerHTML = '<option value="">Error loading files</option>';
+                carouselContainer.innerHTML = '<div class="loading-message">Error loading files</div>';
             }
         }
 
-        async function handleLoadFile() {
-            const filename = fileSelect.value;
-            if (!filename || filename === 'Select a file...') return;
+        function selectFile(filename, tileElement, isUserInteraction = false) {
+            // Track if user explicitly selected a file
+            if (isUserInteraction) {
+                userHasExplicitlySelected = true;
+            }
+
+            // Remove selected class from all tiles
+            document.querySelectorAll('.file-tile').forEach(tile => {
+                tile.classList.remove('selected');
+            });
+
+            // Add selected class to clicked tile
+            tileElement.classList.add('selected');
+
+            // Scroll tile into view
+            tileElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+
+            selectedFilename = filename;
+            lastLineCount = 0;
+
+            // Stop previous polling
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+
+            // Load file and start polling
+            handleLoadFile(filename);
+            pollingInterval = setInterval(() => handleLoadFile(filename), 500);
+        }
+
+        async function handleLoadFile(filename) {
+            if (!filename) return;
 
             try {
                 const response = await fetch(`/api/file/${encodeURIComponent(filename)}`);
                 const text = await response.text();
                 const lines = text.trim().split('\n').filter(line => line.trim());
 
+                // Skip if no new data
+                if (lines.length === lastLineCount) {
+                    return;
+                }
+
+                lastLineCount = lines.length;
+
                 if (lines.length < 2) {
-                    content.innerHTML = '<div class="empty-state"><p>Invalid file format</p></div>';
+                    content.innerHTML = '<div class="empty-state"><p>Waiting for data...</p></div>';
                     return;
                 }
 
@@ -423,7 +599,10 @@
                 renderContent(request, response_data, events);
             } catch (error) {
                 console.error('Error loading file:', error);
-                content.innerHTML = '<div class="empty-state"><p>Error loading file</p></div>';
+                // Don't show error on polling, might be mid-write
+                if (lastLineCount === 0) {
+                    content.innerHTML = '<div class="empty-state"><p>Error loading file</p></div>';
+                }
             }
         }
 
